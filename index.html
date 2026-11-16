@@ -708,17 +708,24 @@ var DEFAULT_PINNED = [
   {label:'준비물 챙기기', unit:'', amount:50}
 ];
 
+/* 가족 기본 별명 */
+var FAMILY_NAMES = {m_child:'듀아', m_mom:'유찡', m_dad:'임쪼니'};
+/* 예전에 들어가 있던 기본 이름 — 이 값 그대로면 새 별명으로 한 번만 옮겨요 */
+var LEGACY_FAMILY_NAMES = {m_child:'아이', m_mom:'엄마', m_dad:'아빠'};
+var namesMigrated = false;
+
 function initialMembers(){
   return [
-    {id:'m_child', name:'아이', intro:'스티치와 함께 💙', avatar:'stitch'},
-    {id:'m_mom', name:'엄마', intro:'엔젤과 함께 🌺', avatar:'angel'},
-    {id:'m_dad', name:'아빠', intro:'스크럼프와 함께 🌴', avatar:'scrump'}
+    {id:'m_child', name:'듀아', intro:'스티치와 함께 💙', avatar:'stitch'},
+    {id:'m_mom', name:'유찡', intro:'엔젤과 함께 🌺', avatar:'angel'},
+    {id:'m_dad', name:'임쪼니', intro:'스크럼프와 함께 🌴', avatar:'scrump'}
   ];
 }
 
 function initialState(){
   var t = dkey();
   var members = initialMembers();
+  var kid = FAMILY_NAMES.m_child;
   var pinned = DEFAULT_PINNED.map(function(p){
     return {id:uid(), memberId:'m_child', label:p.label, unit:p.unit, amount:p.amount};
   });
@@ -734,9 +741,9 @@ function initialState(){
       {id:uid(), memberId:'m_child', label:'책 30분 읽기', done:false},
       {id:uid(), memberId:'m_child', label:'내일 준비물 챙기기', done:false},
       {id:uid(), memberId:'m_child', label:'공부하기', done:false},
-      {id:uid(), memberId:'m_mom', label:'아이 준비물 확인', done:false},
+      {id:uid(), memberId:'m_mom', label:kid + ' 준비물 확인', done:false},
       {id:uid(), memberId:'m_mom', label:'영양제 챙기기', done:false},
-      {id:uid(), memberId:'m_dad', label:'아이랑 저녁 산책', done:false},
+      {id:uid(), memberId:'m_dad', label:kid + josa(kid, '이랑', '랑') + ' 저녁 산책', done:false},
       {id:uid(), memberId:'m_dad', label:'분리수거 내놓기', done:false}
     ],
     studyPinned: pinned,
@@ -771,6 +778,26 @@ function normalize(o){
     if (AVATARS.indexOf(m.avatar) < 0) m.avatar = 'stitch';
   });
   if (!o.childId || !o.members.some(function(m){ return m.id === o.childId; })) o.childId = o.members[0].id;
+  /* 예전 기본 이름(아이·엄마·아빠)이 그대로면 새 별명으로 옮겨요. 직접 바꾼 이름은 건드리지 않습니다. */
+  var legacyRenamed = false;
+  o.members.forEach(function(m){
+    if (LEGACY_FAMILY_NAMES[m.id] && m.name === LEGACY_FAMILY_NAMES[m.id]) {
+      m.name = FAMILY_NAMES[m.id];
+      legacyRenamed = true;
+    }
+  });
+  if (legacyRenamed) {
+    namesMigrated = true;
+    var cm = o.members.filter(function(m){ return m.id === o.childId; })[0];
+    var cn = (cm && cm.name) || FAMILY_NAMES.m_child;
+    if (Array.isArray(o.todos)) {
+      o.todos.forEach(function(t){
+        if (!t || typeof t.label !== 'string') return;
+        if (t.label === '아이 준비물 확인') t.label = cn + ' 준비물 확인';
+        else if (t.label === '아이랑 저녁 산책') t.label = cn + josa(cn, '이랑', '랑') + ' 저녁 산책';
+      });
+    }
+  }
   if (!Array.isArray(o.todos)) o.todos = [];
   if (!Array.isArray(o.studyPinned)) o.studyPinned = [];
   if (!o.study || !o.study.date || !Array.isArray(o.study.items)) o.study = d.study;
@@ -843,6 +870,8 @@ function save(){
 var S = load();
 var hadLocalState = !!S;
 if (!S) { S = initialState(); saveLocal(); }
+/* 기본 이름을 새 별명으로 옮겼으면 이 기기에 바로 저장하고, 서버 사본에도 올려요 */
+if (namesMigrated) { saveLocal(); markDirty(); }
 
 /* =========================================================
    3. 계산 도우미
