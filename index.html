@@ -368,7 +368,7 @@ body.locked .app,body.locked #modal,body.locked #fx{display:none!important}
     <div class="hdr-date" id="date-line">오늘</div>
     <div class="hdr-sub">알로하! 우리집 오하나 기록장</div>
     <div class="hdr-pills">
-      <button class="pill dday" id="dday-pill" data-act="trip">✈️ 상하이 여행</button>
+      <button class="pill dday" id="dday-pill" data-act="trip">🎄 상해 크리스마스 여행</button>
       <span class="pill soft">🌺 오늘도 알로하!</span>
     </div>
   </header>
@@ -642,7 +642,9 @@ var STORAGE_OK = (function(){
   } catch (e) { return false; }
 })();
 var TRIP_START = new Date(2026, 11, 20);
-var TRIP_END = new Date(2026, 11, 24);
+/* 여행 기간은 날짜를 소스에 남기지 않도록 시작일 기준 일수로만 계산해요 */
+var TRIP_DAYS = 5;
+var TRIP_END = new Date(TRIP_START.getTime() + (TRIP_DAYS - 1) * 86400000);
 
 var MISSIONS = [
   {emoji:'🥕', text:'저녁 준비 같이 돕기'},
@@ -851,10 +853,10 @@ function tripText(){
   var today = new Date();
   today.setHours(0, 0, 0, 0);
   var diff = Math.round((TRIP_START - today) / 86400000);
-  if (diff > 0) return '✈️ 상하이 여행 D-' + diff;
-  if (diff === 0) return '✈️ 상하이 여행 출발!';
-  if (today.getTime() <= TRIP_END.getTime()) return '✈️ 상하이 여행 중 D+' + (-diff);
-  return '✈️ 상하이 여행 다녀왔어요';
+  if (diff > 0) return '🎄 상해 크리스마스 여행 D-' + diff;
+  if (diff === 0) return '🎄 상해 크리스마스 여행 출발!';
+  if (today.getTime() <= TRIP_END.getTime()) return '🎄 상해 크리스마스 여행 중';
+  return '🎄 상해 크리스마스 여행 다녀왔어요';
 }
 
 /* 날짜가 바뀌면 오늘의 공부·미션 새로 만들기 */
@@ -1876,7 +1878,9 @@ document.addEventListener('click', function(e){
   if (act === 'trip') {
     var t = new Date(); t.setHours(0,0,0,0);
     var diff = Math.round((TRIP_START - t) / 86400000);
-    toast(diff > 0 ? '12월 20일 출발까지 ' + diff + '일! 김해 → 푸동 오전 비행 ✈️' : '12월 20일~24일, 상하이 모녀 여행 ✈️');
+    toast(diff > 0
+      ? '🎄 상해 크리스마스 여행 D-' + diff + ' · 설레는 크리스마스 여행 준비 중 ✨'
+      : '🎄 상해 크리스마스 여행 · 설레는 크리스마스 여행 준비 중 ✨');
     return;
   }
 
