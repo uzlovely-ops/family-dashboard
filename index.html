@@ -324,7 +324,28 @@ body.locked .app,body.locked #modal,body.locked #fx{display:none!important}
 .lock-card.shake{animation:lockShake .4s ease}
 @keyframes lockPop{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
 .lock-card{animation:lockPop .28s ease both}
+
+/* ---------- 여행 메모 ---------- */
+.trip-hero{background:linear-gradient(160deg,#EAF9F2 0%,#FFF1F6 58%,#FFFDF5 100%)}
+.trip-dday{font-size:25px;font-weight:900;letter-spacing:-1.2px;color:#C1547A;margin-top:3px;line-height:1.25}
+.trip-hero-date{font-size:12px;font-weight:800;color:#8AA6BC;margin-top:4px}
+.trip-prog{display:flex;align-items:center;gap:9px;margin-top:11px}
+.trip-prog .bar{flex:1;margin:0}
+.trip-prog .pct{font-size:11.5px;font-weight:900;color:#1E9478;flex:0 0 auto}
+.sync-line{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border-radius:12px;font-size:11px;font-weight:900;background:#F2FBFF;color:#4E8AA8;border:1.5px solid #DDEFF9;line-height:1.4;text-align:left}
+.sync-line.live{background:#EFFBF5;color:#1E9478;border-color:#CFF0E3}
+.sync-line.warn{background:#FFF8EC;color:#B08530;border-color:#F7E4B6}
+.pill.soft.live{background:#EFFBF5;border-color:#CFF0E3;color:#1E9478}
+.pill.soft.warn{background:#FFF8EC;border-color:#F7E4B6;color:#B08530}
+.plan{display:flex;align-items:flex-start;gap:9px;padding:10px 0;border-bottom:1.6px dashed #EDF4FA}
+.plan:last-of-type{border-bottom:none}
+.plan-day{flex:0 0 auto;min-width:50px;padding:5px 8px;border-radius:11px;background:linear-gradient(135deg,#E6F4FE,#FFE9F0);color:#C1547A;font-size:11.5px;font-weight:900;text-align:center}
+.plan-body{flex:1;min-width:0}
+.plan-memo{font-size:13px;font-weight:700;color:#5E7386;margin-top:1px;white-space:pre-wrap;word-break:break-word;line-height:1.5}
+.plan-memo.ph{color:#BECDD9;font-weight:600}
+.plan-acts{display:flex;gap:4px;flex:0 0 auto}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" async></script>
 </head>
 <body class="locked">
 <div id="lock" class="lock" role="dialog" aria-modal="true" aria-label="잠금 화면">
@@ -369,7 +390,7 @@ body.locked .app,body.locked #modal,body.locked #fx{display:none!important}
     <div class="hdr-sub">알로하! 우리집 오하나 기록장</div>
     <div class="hdr-pills">
       <button class="pill dday" id="dday-pill" data-act="trip">🎄 상해 크리스마스 여행</button>
-      <span class="pill soft">🌺 오늘도 알로하!</span>
+      <button class="pill soft" id="sync-pill" data-act="sync-now" aria-label="동기화 상태">⚪ 이 기기만</button>
     </div>
   </header>
   <main id="view">
@@ -387,6 +408,7 @@ body.locked .app,body.locked #modal,body.locked #fx{display:none!important}
     <button class="nav-btn" data-act="tab" data-tab="study"><span class="ni">📚</span><span class="nl">공부</span></button>
     <button class="nav-btn" data-act="tab" data-tab="allow"><span class="ni">🐷</span><span class="nl">용돈</span></button>
     <button class="nav-btn" data-act="tab" data-tab="chat"><span class="ni">💬</span><span class="nl">채팅</span></button>
+    <button class="nav-btn" data-act="tab" data-tab="trip"><span class="ni">🎄</span><span class="nl">여행</span></button>
   </nav>
 </div>
 <div id="modal" role="dialog" aria-modal="true" aria-label="대화상자"></div>
@@ -641,10 +663,22 @@ var STORAGE_OK = (function(){
     return true;
   } catch (e) { return false; }
 })();
-var TRIP_START = new Date(2026, 11, 20);
-/* 여행 기간은 날짜를 소스에 남기지 않도록 시작일 기준 일수로만 계산해요 */
+/* 여행 출발일 같은 구체 정보는 공개 소스에 두지 않고 가족 DB 상태(S.trip.start)에만 둡니다 */
 var TRIP_DAYS = 5;
-var TRIP_END = new Date(TRIP_START.getTime() + (TRIP_DAYS - 1) * 86400000);
+var DIRTY_KEY = 'family-dashboard-dirty-v1';
+var CHECK_SVG = '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+var clockOffset = 0; /* 서버 시각과 이 기기 시각의 차이(ms) */
+
+var TRIP_CHECK_SEED = ['여권', '유심·eSIM', '알리페이 충전', '우비·장우산', '상비약'];
+function tripDefault(){
+  return {
+    start: '',
+    checklist: TRIP_CHECK_SEED.map(function(x){ return {id:uid(), text:x, done:false}; }),
+    days: [1, 2, 3, 4, 5].map(function(n){ return {id:uid(), title:n + '일차', memo:''}; }),
+    food: [],
+    shop: []
+  };
+}
 
 var MISSIONS = [
   {emoji:'🥕', text:'저녁 준비 같이 돕기'},
@@ -719,7 +753,9 @@ function initialState(){
     chatMember: 'm_child',
     chatLocked: false,
     alarm: {enabled:false, time:'20:00', lastFired:null},
-    timerSet: 10
+    timerSet: 10,
+    trip: tripDefault(),
+    savedAt: 0
   };
 }
 
@@ -754,6 +790,26 @@ function normalize(o){
   if (typeof o.alarm.enabled !== 'boolean') o.alarm.enabled = false;
   if (typeof o.alarm.time !== 'string' || !/^\d{2}:\d{2}$/.test(o.alarm.time)) o.alarm.time = '20:00';
   if (typeof o.timerSet !== 'number' || o.timerSet < 1) o.timerSet = 10;
+  if (typeof o.savedAt !== 'number' || !isFinite(o.savedAt) || o.savedAt < 0) o.savedAt = 0;
+
+  /* 🎄 여행 메모장 */
+  if (!o.trip || typeof o.trip !== 'object') o.trip = tripDefault();
+  var tdef = tripDefault();
+  if (typeof o.trip.start !== 'string') o.trip.start = '';
+  ['checklist', 'days', 'food', 'shop'].forEach(function(k){
+    if (!Array.isArray(o.trip[k])) { o.trip[k] = tdef[k]; return; }
+    o.trip[k] = o.trip[k].filter(function(x){ return x && typeof x === 'object'; }).map(function(x){
+      if (!x.id) x.id = uid();
+      if (k === 'days') {
+        if (typeof x.title !== 'string') x.title = '';
+        if (typeof x.memo !== 'string') x.memo = '';
+      } else {
+        if (typeof x.text !== 'string') x.text = String(x.text || '');
+        x.done = !!x.done;
+      }
+      return x;
+    });
+  });
   o.v = 1;
   return o;
 }
@@ -765,12 +821,28 @@ function load(){
     return normalize(JSON.parse(raw));
   } catch (e) { return null; }
 }
-function save(){
+function saveLocal(){
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+}
+function markDirty(){
+  try { localStorage.setItem(DIRTY_KEY, '1'); } catch (e) {}
+}
+function clearDirtyFlag(){
+  try { localStorage.removeItem(DIRTY_KEY); } catch (e) {}
+}
+function isDirty(){
+  try { return localStorage.getItem(DIRTY_KEY) === '1'; } catch (e) { return false; }
+}
+function save(){
+  S.savedAt = syncNow();
+  saveLocal();
+  markDirty();
+  queuePush();
 }
 
 var S = load();
-if (!S) { S = initialState(); save(); }
+var hadLocalState = !!S;
+if (!S) { S = initialState(); saveLocal(); }
 
 /* =========================================================
    3. 계산 도우미
@@ -849,19 +921,31 @@ function hasBatchim(word){
 }
 function josa(word, withB, withoutB){ return hasBatchim(word) ? withB : withoutB; }
 
+var TRIP_LABEL = '🎄 상해 크리스마스 여행';
+function tripStart(){
+  var s = (S.trip && S.trip.start) || '';
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
+  if (!m) return null;
+  var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return isNaN(d.getTime()) ? null : d;
+}
 function tripText(){
+  var start = tripStart();
+  if (!start) return TRIP_LABEL;
+  var end = new Date(start.getTime() + (TRIP_DAYS - 1) * 86400000);
   var today = new Date();
   today.setHours(0, 0, 0, 0);
-  var diff = Math.round((TRIP_START - today) / 86400000);
-  if (diff > 0) return '🎄 상해 크리스마스 여행 D-' + diff;
-  if (diff === 0) return '🎄 상해 크리스마스 여행 출발!';
-  if (today.getTime() <= TRIP_END.getTime()) return '🎄 상해 크리스마스 여행 중';
-  return '🎄 상해 크리스마스 여행 다녀왔어요';
+  var diff = Math.round((start - today) / 86400000);
+  if (diff > 0) return TRIP_LABEL + ' D-' + diff;
+  if (diff === 0) return TRIP_LABEL + ' 출발!';
+  if (today.getTime() <= end.getTime()) return TRIP_LABEL + ' 중';
+  return TRIP_LABEL + ' 다녀왔어요';
 }
 
 /* 날짜가 바뀌면 오늘의 공부·미션 새로 만들기 */
 function ensureToday(){
   var t = dkey();
+  var changed = false;
   if (S.study.date !== t) {
     S.study = {
       date: t,
@@ -869,13 +953,15 @@ function ensureToday(){
         return {id:uid(), pinnedId:p.id, memberId:p.memberId, label:p.label, unit:p.unit, amount:num(p.amount), done:false};
       })
     };
+    changed = true;
   }
   if (S.mission.date !== t) {
     S.mission.date = t;
     S.mission.done = false;
     S.mission.idx = Math.floor(Math.random() * MISSIONS.length);
+    changed = true;
   }
-  save();
+  if (changed) save();
 }
 
 /* =========================================================
@@ -1177,7 +1263,8 @@ var TABS = [
   {id:'todo', icon:'✅', label:'할 일'},
   {id:'study', icon:'📚', label:'공부'},
   {id:'allow', icon:'🐷', label:'용돈'},
-  {id:'chat', icon:'💬', label:'채팅'}
+  {id:'chat', icon:'💬', label:'채팅'},
+  {id:'trip', icon:'🎄', label:'여행'}
 ];
 
 function renderHeader(){
@@ -1186,6 +1273,7 @@ function renderHeader(){
   if (pill) pill.textContent = tripText();
   var m = document.getElementById('brand-mascot');
   if (m) m.innerHTML = av('stitch', 34);
+  paintSync();
 }
 
 function renderNav(){
@@ -1547,11 +1635,11 @@ function renderChat(){
   }).join('');
   var stickers = ['svg:stitch','svg:angel','svg:scrump','🌺','🍍','🏄','💙','🌴','🎸','🌊','🍧','🥥','🐚','🦩','🐠','☀️','🌈','🍉'];
 
-  return '<div class="note-bar">🔎 이 기기 안에 저장되는 가족 쪽지함이에요 (다른 기기 실시간 연동은 서버 연결 시 가능)</div>' +
+  return '<div class="note-bar">' + (syncConfigured() ? '🔄 우리 가족 쪽지함이에요 · 세 대가 실시간으로 함께 봐요' : '🔎 이 기기 안에 저장되는 가족 쪽지함이에요 (서버 연결을 준비 중이에요)') + '</div>' +
 
     '<section class="card">' +
       '<div class="card-title">💬 우리 가족 채팅</div>' +
-      '<p class="sub-line">말풍선과 스티커로 이야기해요 · 이 기기에만 저장돼요</p>' +
+      '<p class="sub-line">말풍선과 스티커로 이야기해요 · ' + (syncConfigured() ? '가족 모두 함께 봐요' : '이 기기에만 저장돼요') + '</p>' +
       '<div class="divider"></div>' +
       (S.chatLocked
         ? '<div class="row between">' +
@@ -1582,6 +1670,98 @@ function renderChat(){
     '<p class="foot-note">마음은 짧아도 괜찮아요 💗</p>';
 }
 
+/* ----- 🎄 여행 메모장 ----- */
+function dateMD(d){ return (d.getMonth() + 1) + '월 ' + d.getDate() + '일'; }
+function tripPeriodLabel(){
+  var start = tripStart();
+  if (!start) return '출발일을 넣으면 D-day가 보여요';
+  var end = new Date(start.getTime() + (TRIP_DAYS - 1) * 86400000);
+  return dateMD(start) + ' ~ ' + dateMD(end) + ' · ' + TRIP_DAYS + '일';
+}
+
+function tripRow(kind, it){
+  return '<div class="todo' + (it.done ? ' done' : '') + '">' +
+    '<button class="chk' + (it.done ? ' on' : '') + '" data-act="trip-toggle" data-kind="' + kind + '" data-id="' + it.id + '" aria-label="체크">' + (it.done ? CHECK_SVG : '') + '</button>' +
+    '<span class="todo-label">' + esc(it.text) + '</span>' +
+    '<button class="mini" data-act="trip-edit" data-kind="' + kind + '" data-id="' + it.id + '" aria-label="고치기">✏️</button>' +
+    '<button class="mini danger" data-act="trip-del" data-kind="' + kind + '" data-id="' + it.id + '" aria-label="지우기">✕</button>' +
+  '</div>';
+}
+
+function tripListCard(kind, title, sub, addLabel, emptyText){
+  var items = S.trip[kind] || [];
+  var done = items.filter(function(x){ return x.done; }).length;
+  var rows = items.length
+    ? items.map(function(it){ return tripRow(kind, it); }).join('')
+    : '<p class="empty">' + emptyText + '</p>';
+  return '<section class="card">' +
+      '<div class="row between">' +
+        '<div class="card-title">' + title + '</div>' +
+        '<span class="chip-soft">' + done + '/' + items.length + '</span>' +
+      '</div>' +
+      '<p class="sub-line">' + sub + '</p>' +
+      '<div class="divider"></div>' +
+      rows +
+      '<button class="add-dash" data-act="trip-add" data-kind="' + kind + '">+ ' + addLabel + '</button>' +
+    '</section>';
+}
+
+function renderTripDays(){
+  var days = S.trip.days || [];
+  var rows = days.length ? days.map(function(d, i){
+    return '<div class="plan">' +
+      '<div class="plan-day">' + esc(d.title || (i + 1) + '일차') + '</div>' +
+      '<div class="plan-body">' +
+        (d.memo ? '<div class="plan-memo">' + esc(d.memo) + '</div>' : '<div class="plan-memo ph">메모를 남겨 보세요</div>') +
+      '</div>' +
+      '<div class="plan-acts">' +
+        '<button class="mini" data-act="trip-day-edit" data-id="' + d.id + '" aria-label="고치기">✏️</button>' +
+        '<button class="mini danger" data-act="trip-day-del" data-id="' + d.id + '" aria-label="지우기">✕</button>' +
+      '</div>' +
+    '</div>';
+  }).join('') : '<p class="empty">일정 메모를 추가해 보세요</p>';
+
+  return '<section class="card">' +
+      '<div class="row between">' +
+        '<div class="card-title">🗓️ 일정 메모</div>' +
+        '<button class="btn white sm" data-act="trip-day-add">+ 일정 추가</button>' +
+      '</div>' +
+      '<p class="sub-line">날짜별로 하고 싶은 일을 적어 두면 잊지 않아요</p>' +
+      '<div class="divider"></div>' +
+      rows +
+    '</section>';
+}
+
+function renderTrip(){
+  var t = S.trip;
+  var total = (t.checklist || []).length;
+  var checked = (t.checklist || []).filter(function(x){ return x.done; }).length;
+  var pct = total ? Math.round(checked / total * 100) : 0;
+
+  return '<section class="card trip-hero">' +
+      '<div class="row between" style="align-items:flex-start">' +
+        '<div class="grow">' +
+          '<div class="card-title">🎄 여행 메모장</div>' +
+          '<div class="trip-dday">' + esc(tripText()) + '</div>' +
+          '<div class="trip-hero-date">' + esc(tripPeriodLabel()) + '</div>' +
+        '</div>' +
+        '<button class="mini" data-act="trip-start" aria-label="출발일 정하기">📅</button>' +
+      '</div>' +
+      '<div class="trip-prog">' +
+        '<span class="tiny muted">준비물</span>' +
+        '<div class="bar"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
+        '<span class="pct">' + checked + '/' + total + '</span>' +
+      '</div>' +
+      '<div style="margin-top:11px"><span class="sync-line" id="sync-line">' + esc(syncStatusText()) + '</span></div>' +
+      '<p class="tiny muted" style="margin-top:9px">여기 적은 내용은 잠금(0103)으로 가려지는 가족 메모장에만 저장되고, 가족 모두가 함께 봐요.</p>' +
+    '</section>' +
+    tripListCard('checklist', '🧳 준비물 체크', '여권부터 상비약까지, 챙길 때마다 하나씩', '준비물 추가', '아직 준비물이 없어요') +
+    renderTripDays() +
+    tripListCard('food', '🍜 먹고 싶은 것', '가 보고 싶은 맛집과 먹고 싶은 메뉴', '먹고 싶은 것 추가', '먹고 싶은 것을 적어 두세요') +
+    tripListCard('shop', '🛍️ 쇼핑 리스트', '미니소·기념품처럼 사 올 것을 적어 둬요', '쇼핑 리스트 추가', '쇼핑 리스트가 비어 있어요') +
+    '<p class="foot-note">적어 둔 만큼 여행이 더 즐거워져요 🎄</p>';
+}
+
 function render(){
   ensureToday();
   renderHeader();
@@ -1590,11 +1770,13 @@ function render(){
   else if (tab === 'todo') html = renderTodo();
   else if (tab === 'study') html = renderStudy();
   else if (tab === 'allow') html = renderAllow();
+  else if (tab === 'trip') html = renderTrip();
   else html = renderChat();
 
   document.getElementById('view').innerHTML = html;
   renderNav();
   paintTimer();
+  paintSync();
 
   if (tab === 'chat' && scrollChat) {
     scrollChat = false;
@@ -1628,6 +1810,11 @@ function patchAllow(){
 function currentMemberForTodo(btn){
   var id = btn.getAttribute('data-member');
   return findMember(id) || child();
+}
+function findTripItem(kind, id){
+  var arr = (S.trip && S.trip[kind]) || [];
+  for (var i = 0; i < arr.length; i++) { if (arr[i].id === id) return arr[i]; }
+  return null;
 }
 
 function addStudyTx(item){
@@ -1757,7 +1944,10 @@ function openSettings(){
       '<h4 class="sh">돼지저금통 시작 금액</h4>' +
       startRows +
       '<h4 class="sh">데이터</h4>' +
-      '<p class="sheet-desc">모든 기록은 이 기기 브라우저 안에만 저장돼요. 앱을 지우거나 브라우저 기록을 비우면 함께 사라져요.</p>' +
+      '<p class="sheet-desc">' + (syncConfigured()
+        ? '기록은 가족 서버와 실시간으로 맞춰지고, 이 기기 브라우저에도 사본이 남아요.'
+        : '모든 기록은 이 기기 브라우저 안에만 저장돼요. 앱을 지우거나 브라우저 기록을 비우면 함께 사라져요.') + '</p>' +
+      '<p class="sheet-desc" id="settings-sync">' + esc(syncStatusText()) + '</p>' +
       (STORAGE_OK ? '' : '<p class="sheet-desc" style="color:#C06A7A">⚠️ 이 브라우저에서는 자동 저장이 막혀 있어요. 화면을 닫으면 기록이 사라질 수 있어요.</p>') +
       '<button class="btn ghost wfull danger-text" data-act="reset-all">모든 기록 지우고 처음으로</button>' +
       '<div class="sheet-actions"><button class="btn primary wfull" data-modal-close>닫기</button></div>' +
@@ -1855,6 +2045,240 @@ function sendChatMessage(text, type){
 }
 
 /* =========================================================
+   9.5 가족 실시간 동기화 (Supabase 무료 플랜)
+   ========================================================= */
+var SB_URL = (window.__FDC_SUPABASE__ && window.__FDC_SUPABASE__.url) || '';
+var SB_KEY = (window.__FDC_SUPABASE__ && window.__FDC_SUPABASE__.key) || '';
+var SYNC_PIN = '0103';
+var SYNC_CHANNEL = 'family-0103';
+var SYNC_DEVICE_KEY = 'family-dashboard-device-v1';
+
+function syncNow(){ return Date.now() + (clockOffset || 0); }
+
+var deviceId = (function(){
+  try {
+    var v = localStorage.getItem(SYNC_DEVICE_KEY);
+    if (!v) { v = 'd' + Math.random().toString(36).slice(2, 9); localStorage.setItem(SYNC_DEVICE_KEY, v); }
+    return v;
+  } catch (e) { return 'd' + Math.random().toString(36).slice(2, 9); }
+})();
+
+var sb = null;
+var syncChannel = null;
+var syncMeta = { status: 'off', err: '', pushing: false, pending: false, pulling: false, lastOk: 0 };
+var pushTimer = null;
+var syncBooted = false;
+
+function syncConfigured(){ return !!(SB_URL && SB_KEY); }
+
+function syncStatusText(){
+  if (!syncConfigured() || !sb) return '⚪ 지금은 이 기기 안에만 저장돼요';
+  if (syncMeta.status === 'warn') return '⚠️ 연결이 잠깐 끊겼어요 · 다시 맞추는 중';
+  if (syncMeta.status === 'live') return '🟢 가족 모두 실시간으로 함께 보고 있어요';
+  return '🔄 서버에 연결하는 중이에요…';
+}
+function syncPillText(){
+  if (!syncConfigured() || !sb) return '⚪ 이 기기만';
+  if (syncMeta.status === 'warn') return '⚠️ 동기화 지연';
+  if (syncMeta.status === 'live') return '🟢 실시간 동기화';
+  return '🔄 연결 중';
+}
+function paintSync(){
+  var cls = (syncMeta.status === 'live') ? 'live' : (syncMeta.status === 'warn' ? 'warn' : '');
+  var pill = document.getElementById('sync-pill');
+  if (pill) { pill.textContent = syncPillText(); pill.className = 'pill soft' + (cls ? ' ' + cls : ''); }
+  var line = document.getElementById('sync-line');
+  if (line) { line.textContent = syncStatusText(); line.className = 'sync-line' + (cls ? ' ' + cls : ''); }
+}
+function sameState(a, b){
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; }
+}
+function userTyping(){
+  try {
+    var el = document.activeElement;
+    if (!el || !el.tagName) return false;
+    if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return false;
+    var view = document.getElementById('view');
+    return !!(view && view.contains(el));
+  } catch (e) { return false; }
+}
+function applyRemote(remote){
+  S = normalize(remote);
+  hadLocalState = true;
+  saveLocal();
+  clearDirtyFlag();
+  if (!findMember(sel.study)) sel.study = S.childId;
+  if (!findMember(sel.allow)) sel.allow = S.childId;
+  if (!sel.chat || !findMember(sel.chat)) sel.chat = S.members[0].id;
+  render();
+  paintSync();
+}
+
+function queuePush(){
+  if (!syncConfigured() || !sb) return;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(function(){ pushTimer = null; push(); }, 450);
+}
+
+function push(){
+  if (!syncConfigured() || !sb) return;
+  if (syncMeta.pushing) { syncMeta.pending = true; return; }
+  syncMeta.pushing = true;
+  syncMeta.pending = false;
+  var payload;
+  try { payload = JSON.parse(JSON.stringify(S)); } catch (e) { payload = S; }
+  sb.rpc('save_family_state', { p_pin: SYNC_PIN, p_data: payload }).then(function(res){
+    syncMeta.pushing = false;
+    if (!res || res.error) {
+      syncMeta.status = 'warn';
+      syncMeta.err = (res && res.error && res.error.message) || 'save_failed';
+      syncMeta.pending = true;
+      markDirty();
+      paintSync();
+      return;
+    }
+    if (res.data) {
+      var serverAt = typeof res.data === 'string' ? Date.parse(res.data) : NaN;
+      if (!isNaN(serverAt)) clockOffset = serverAt - Date.now();
+    }
+    clearDirtyFlag();
+    syncMeta.status = 'live';
+    syncMeta.lastOk = Date.now();
+    if (syncChannel) {
+      try { syncChannel.send({ type: 'broadcast', event: 'state', payload: { from: deviceId, savedAt: payload.savedAt } }); } catch (e) {}
+    }
+    paintSync();
+    if (syncMeta.pending) { syncMeta.pending = false; push(); }
+  }, function(err){
+    syncMeta.pushing = false;
+    syncMeta.pending = true;
+    syncMeta.status = 'warn';
+    syncMeta.err = String((err && err.message) || err || 'network');
+    markDirty();
+    paintSync();
+  });
+}
+
+function pull(){
+  if (!syncConfigured() || !sb) return;
+  if (syncMeta.pulling) return;
+  syncMeta.pulling = true;
+  sb.rpc('get_family_state', { p_pin: SYNC_PIN }).then(function(res){
+    syncMeta.pulling = false;
+    if (!res || res.error) {
+      syncMeta.status = 'warn';
+      syncMeta.err = (res && res.error && res.error.message) || 'fetch_failed';
+      paintSync();
+      return;
+    }
+    var remote = res.data;
+    if (typeof remote === 'string') { try { remote = JSON.parse(remote); } catch (e) { remote = null; } }
+    if (!remote || typeof remote !== 'object' || !Array.isArray(remote.members)) {
+      syncBooted = true;
+      push();
+      return;
+    }
+    syncMeta.status = 'live';
+    syncMeta.lastOk = Date.now();
+    /* 새 기기(이 브라우저에 기록이 없는 경우)는 서버 기록을 먼저 불러와요 */
+    if (!hadLocalState) {
+      syncBooted = true;
+      applyRemote(remote);
+      paintSync();
+      return;
+    }
+    if (isDirty() || syncMeta.pushing || syncMeta.pending) {
+      syncBooted = true;
+      push();
+      return;
+    }
+    if (sameState(remote, S)) {
+      clearDirtyFlag();
+      syncBooted = true;
+      paintSync();
+      return;
+    }
+    var rAt = Number(remote.savedAt) || 0;
+    var lAt = Number(S.savedAt) || 0;
+    if (rAt >= lAt) {
+      if (userTyping()) { paintSync(); return; }   /* 입력 중이면 조금 뒤에 맞춰요 */
+      syncBooted = true;
+      applyRemote(remote);
+      paintSync();
+      return;
+    }
+    syncBooted = true;
+    push();
+  }, function(err){
+    syncMeta.pulling = false;
+    syncMeta.status = 'warn';
+    syncMeta.err = String((err && err.message) || err || 'network');
+    paintSync();
+  });
+}
+
+function startRealtime(){
+  try {
+    syncChannel = sb.channel(SYNC_CHANNEL, { config: { broadcast: { self: false } } });
+    syncChannel.on('broadcast', { event: 'state' }, function(msg){
+      var p = (msg && msg.payload) || {};
+      if (p.from === deviceId) return;
+      pull();
+    });
+    syncChannel.subscribe(function(status){
+      if (status === 'SUBSCRIBED') { syncMeta.status = 'live'; }
+      else if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') { syncMeta.status = 'warn'; }
+      else if (status === 'CLOSED') { syncMeta.status = 'warn'; }
+      paintSync();
+      if (status === 'SUBSCRIBED') pull();
+    });
+  } catch (e) {
+    syncMeta.status = 'warn';
+    syncMeta.err = String((e && e.message) || e);
+    paintSync();
+  }
+}
+
+function syncInit(){
+  if (!syncConfigured()) { syncMeta.status = 'off'; paintSync(); return; }
+  syncMeta.status = 'connecting';
+  paintSync();
+  var tries = 0;
+  (function waitLib(){
+    if (window.supabase && typeof window.supabase.createClient === 'function') { startClient(); return; }
+    if (++tries > 40) {
+      syncMeta.status = 'warn';
+      syncMeta.err = 'client_unavailable';
+      paintSync();
+      return;
+    }
+    setTimeout(waitLib, 200);
+  })();
+}
+
+function startClient(){
+  try {
+    sb = window.supabase.createClient(SB_URL, SB_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      realtime: { params: { eventsPerSecond: 5 } }
+    });
+  } catch (e) {
+    sb = null;
+    syncMeta.status = 'warn';
+    syncMeta.err = String((e && e.message) || e);
+    paintSync();
+    return;
+  }
+  startRealtime();
+  pull();
+  setInterval(function(){ if (document.visibilityState !== 'hidden') pull(); }, 25000);
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible') pull();
+  });
+  window.addEventListener('online', function(){ pull(); });
+}
+
+/* =========================================================
    10. 이벤트
    ========================================================= */
 document.addEventListener('click', function(e){
@@ -1876,11 +2300,141 @@ document.addEventListener('click', function(e){
   if (act === 'open-settings') { openSettings(); return; }
   if (act === 'lock') { lockNow(); return; }
   if (act === 'trip') {
-    var t = new Date(); t.setHours(0,0,0,0);
-    var diff = Math.round((TRIP_START - t) / 86400000);
-    toast(diff > 0
-      ? '🎄 상해 크리스마스 여행 D-' + diff + ' · 설레는 크리스마스 여행 준비 중 ✨'
-      : '🎄 상해 크리스마스 여행 · 설레는 크리스마스 여행 준비 중 ✨');
+    tab = 'trip';
+    scrollChat = false;
+    window.scrollTo({top:0, behavior:'instant' in window ? 'instant' : 'auto'});
+    render();
+    return;
+  }
+  if (act === 'sync-now') {
+    if (!syncConfigured() || !sb) { toast('서버 연결을 준비하는 중이에요'); paintSync(); return; }
+    pull();
+    toast('최신 기록을 확인하는 중이에요 🔄');
+    return;
+  }
+
+  /* ---- 🎄 여행 메모장 ---- */
+  if (act === 'trip-start') {
+    askForm({
+      title: '여행 출발일',
+      desc: '출발일을 넣으면 D-day가 계산돼요. 비워 두면 D-day 없이 보여요.',
+      submit: '저장',
+      fields: [{key:'start', label:'출발일 (2026-12-20 처럼)', value: S.trip.start || '', placeholder:'2026-12-20'}],
+      onSubmit: function(v){
+        var s = String(v.start || '').trim();
+        if (s && !/^\d{4}-\d{2}-\d{2}$/.test(s)) { toast('2026-12-20 처럼 적어 주세요'); return; }
+        S.trip.start = s;
+        save();
+        render();
+        toast(s ? '출발일을 저장했어요 🎄' : '출발일을 비워 두었어요');
+      }
+    });
+    return;
+  }
+  if (act === 'trip-toggle') {
+    var kindT = btn.getAttribute('data-kind');
+    var itemT = findTripItem(kindT, btn.getAttribute('data-id'));
+    if (!itemT) return;
+    itemT.done = !itemT.done;
+    save();
+    if (itemT.done) { confetti(14); chime('soft'); }
+    render();
+    return;
+  }
+  if (act === 'trip-add') {
+    var kindA = btn.getAttribute('data-kind');
+    var ask = {
+      checklist: {title:'준비물 추가', ph:'예: 여권 사본', label:'준비물'},
+      food: {title:'먹고 싶은 것 추가', ph:'예: 샤오롱바오', label:'먹고 싶은 것'},
+      shop: {title:'쇼핑 리스트 추가', ph:'예: 미니소 인형', label:'살 것'}
+    }[kindA] || {title:'추가', ph:'', label:'내용'};
+    askForm({
+      title: ask.title,
+      submit: '추가',
+      fields: [{key:'text', label: ask.label, placeholder: ask.ph}],
+      onSubmit: function(v){
+        var text = String(v.text || '').trim();
+        if (!text) { toast('내용을 적어 주세요'); return; }
+        S.trip[kindA].push({id:uid(), text:text, done:false});
+        save();
+        render();
+        toast('추가했어요 🎄');
+      }
+    });
+    return;
+  }
+  if (act === 'trip-edit') {
+    var kindE = btn.getAttribute('data-kind');
+    var itemE = findTripItem(kindE, btn.getAttribute('data-id'));
+    if (!itemE) return;
+    askForm({
+      title: '내용 고치기', submit: '저장',
+      fields: [{key:'text', label:'내용', value:itemE.text}],
+      onSubmit: function(v){
+        var text = String(v.text || '').trim();
+        if (!text) { toast('내용을 적어 주세요'); return; }
+        itemE.text = text;
+        save();
+        render();
+      }
+    });
+    return;
+  }
+  if (act === 'trip-del') {
+    var kindD = btn.getAttribute('data-kind');
+    var idD = btn.getAttribute('data-id');
+    S.trip[kindD] = (S.trip[kindD] || []).filter(function(x){ return x.id !== idD; });
+    save();
+    render();
+    toast('지웠어요');
+    return;
+  }
+  if (act === 'trip-day-add') {
+    askForm({
+      title: '일정 메모 추가',
+      desc: '1일차처럼 날짜나 이름을 적고, 그날 하고 싶은 일을 메모해요.',
+      submit: '추가',
+      fields: [
+        {key:'title', label:'날짜·이름', value:(S.trip.days.length + 1) + '일차', placeholder:'예: 1일차'},
+        {key:'memo', label:'메모', type:'textarea', placeholder:'예: 오전에 근처 산책, 점심은 샤오롱바오'}
+      ],
+      onSubmit: function(v){
+        var title = String(v.title || '').trim() || ((S.trip.days.length + 1) + '일차');
+        S.trip.days.push({id:uid(), title:title, memo:String(v.memo || '').trim()});
+        save();
+        render();
+        toast('일정 메모를 추가했어요 🗓️');
+      }
+    });
+    return;
+  }
+  if (act === 'trip-day-edit') {
+    var dayId = btn.getAttribute('data-id');
+    var day = null;
+    S.trip.days.forEach(function(d){ if (d.id === dayId) day = d; });
+    if (!day) return;
+    askForm({
+      title: '일정 메모 고치기', submit: '저장',
+      fields: [
+        {key:'title', label:'날짜·이름', value:day.title},
+        {key:'memo', label:'메모', type:'textarea', value:day.memo}
+      ],
+      onSubmit: function(v){
+        day.title = String(v.title || '').trim() || day.title;
+        day.memo = String(v.memo || '').trim();
+        save();
+        render();
+        toast('일정 메모를 저장했어요 ✓');
+      }
+    });
+    return;
+  }
+  if (act === 'trip-day-del') {
+    var dayDelId = btn.getAttribute('data-id');
+    S.trip.days = S.trip.days.filter(function(d){ return d.id !== dayDelId; });
+    save();
+    render();
+    toast('일정 메모를 지웠어요');
     return;
   }
 
@@ -2310,7 +2864,7 @@ document.addEventListener('click', function(e){
     return;
   }
   if (act === 'reset-all') {
-    askConfirm('모든 기록을 지울까요?', '할 일 · 공부 · 도장 · 용돈 · 쪽지가 모두 지워지고 처음 상태로 돌아가요. 되돌릴 수 없어요.', '처음으로', function(){
+    askConfirm('모든 기록을 지울까요?', '할 일 · 공부 · 도장 · 용돈 · 쪽지 · 여행 메모가 모두 지워지고 처음 상태로 돌아가요. 가족 모두의 화면에서 함께 지워지고, 되돌릴 수 없어요.', '처음으로', function(){
       try { localStorage.removeItem(KEY); } catch (e) {}
       S = initialState();
       sel = {study:S.childId, allow:S.childId, chat:S.childId};
@@ -2479,6 +3033,7 @@ function unlockApp(){
   lockBuf = '';
   hideLock();
   try { render(); paintTimer(); } catch(e){}
+  try { pull(); } catch(e){}
 }
 
 function lockNow(){
@@ -2540,6 +3095,7 @@ ensureToday();
 render();
 paintTimer();
 initLock();
+syncInit();
 
 /* 홈을 다시 열어도 오늘 정보로 갱신 */
 window.addEventListener('focus', function(){
